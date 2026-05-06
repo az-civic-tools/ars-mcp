@@ -13,7 +13,7 @@ export default {
     const path = url.pathname;
 
     if (path === "/mcp" || path.startsWith("/mcp/")) {
-      const r = await mcpFetch(request, env as unknown as Record<string, DurableObjectNamespace<never>>, ctx);
+      const r = await mcpFetch(request, env as never, ctx);
       return r ?? new Response("not found", { status: 404 });
     }
 

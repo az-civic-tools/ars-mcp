@@ -15,6 +15,15 @@ export class ARSMCP extends McpAgent<Env> {
     version: "0.1.0",
   });
 
+  // Workaround for agents@0.12.3: the inherited onStart() calls
+  // `this.server.connect()` early, which then collides with the
+  // `server.connect()` in fetch() and throws "Already connected to a
+  // transport". Override to restore props but skip the early connect.
+  override async onStart(): Promise<void> {
+    const stored = await this.ctx.storage.get("props");
+    if (stored) this.props = stored as typeof this.props;
+  }
+
   async init(): Promise<void> {
     const db = () => this.env.DB;
 
