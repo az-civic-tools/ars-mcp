@@ -1,0 +1,17 @@
+{
+  "name": "ars-scraper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ARS MCP scraper Worker — pulls sections from azleg.gov into D1",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250923.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.80.0"
+  }
+}
