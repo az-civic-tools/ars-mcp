@@ -1,20 +1,15 @@
 import { handleRest } from "./rest";
-import { ARSMCP } from "./mcp";
+import { handleMcp } from "./mcp";
 import { LANDING_HTML } from "./landing";
 import type { Env } from "./types";
 
-export { ARSMCP };
-
-const mcpFetch = ARSMCP.mount("/mcp", { binding: "MCP_OBJECT" }).fetch;
-
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    if (path === "/mcp" || path.startsWith("/mcp/")) {
-      const r = await mcpFetch(request, env as never, ctx);
-      return r ?? new Response("not found", { status: 404 });
+    if (path === "/mcp") {
+      return handleMcp(request, env);
     }
 
     if (path.startsWith("/api/")) {

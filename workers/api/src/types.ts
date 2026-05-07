@@ -1,7 +1,6 @@
 export interface Env {
   DB: D1Database;
   SITE_NAME: string;
-  MCP_OBJECT: DurableObjectNamespace;
 }
 
 export interface Section {
