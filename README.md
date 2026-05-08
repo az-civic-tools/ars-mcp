@@ -4,22 +4,78 @@ Free, open-source MCP server and REST API for the Arizona Revised Statutes.
 
 Live at **https://ars.cactus.watch**.
 
+> **Full documentation lives in the [Wiki](https://github.com/az-civic-tools/ars-mcp/wiki).**
+
 ## What this is
 
-A weekly-refreshed mirror of the Arizona Revised Statutes (ARS), exposed as:
+A weekly-refreshed mirror of every section of the Arizona Revised Statutes (ARS), exposed as:
 
 - **A REST API** anyone can hit with `curl` (no key, no auth)
 - **A remote MCP server** you can plug into Claude Desktop, Cursor, Cline, or any other MCP client
 
-The data is scraped from [azleg.gov](https://www.azleg.gov/arstitle/), the official source. This mirror is **not authoritative**: every response carries a disclaimer pointing back to azleg.gov for legal use.
+The data is scraped from [azleg.gov](https://www.azleg.gov/arstitle/), the official source. **47 active titles, 22,780 sections, fully indexed for FTS5 full-text search.**
 
-## Why
+## What is an MCP?
 
-If you do AZ legal, civic, or compliance work, you reference statutes constantly. Cite-checking via curl + a wrapper SPA is slow and noisy. This service gives you full-text search, fast lookups, and an MCP your AI assistant can call directly.
+**MCP** stands for **Model Context Protocol** — an open standard that lets AI assistants (Claude, Cursor, Cline, etc.) call external tools in a structured, predictable way. Think of it like a Lego brick that snaps onto your AI: instead of asking your assistant to scrape a website, you give it a tool that returns clean structured data.
+
+The protocol defines:
+- **Tools** the AI can call (with typed inputs and outputs)
+- **A transport** that carries the calls between client and server (we use Streamable HTTP)
+- **A discovery handshake** so the AI knows what's available
+
+That's it. No special model, no fine-tuning, no proprietary glue. Any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.) can use this server.
+
+Want a deeper read? See [Why MCP?](https://github.com/az-civic-tools/ars-mcp/wiki/Why-MCP) in the wiki.
+
+## Why use an MCP (vs just curl-ing azleg.gov)?
+
+Three reasons.
+
+**1. Search.** azleg.gov has no real full-text search across the whole code. You can browse by title or click around in their SPA, but you can't ask "show me every section that mentions 'major contributors' in Title 16." The MCP can — across all 22,780 sections in milliseconds.
+
+**2. Token economy.** azleg.gov serves the SPA wrapper at `/viewdocument/?docName=...` — a 78 KB page with the actual statute buried inside. The MCP returns ~1-3 KB of clean text per section, already stripped of HTML chrome.
+
+**3. The model can call it natively.** Tool calls aren't web fetches. Claude doesn't have to know about azleg's URL pattern, the `<font color=GREEN>16-101</font>` markup, or the difference between `/ars/16/00925.htm` and `/ars/16/00925-01.htm`. It just calls `ars_get_section(citation="16-925")` and gets clean text back.
+
+### Token usage example (real numbers)
+
+**Task:** "What does A.R.S. § 16-925 require for sign disclaimers?"
+
+**Without MCP** (Claude curls azleg.gov directly):
+
+| Step | Approx tokens |
+|------|---------------|
+| Figure out the right URL pattern (or fetch via WebFetch) | ~600 |
+| Pull the page (78 KB SPA wrapper or 4 KB bare HTML) | ~5,000–20,000 |
+| Strip HTML, parse out the body, identify section heading | ~800 |
+| Format an answer | ~600 |
+| **Total** | **~7,000–22,000 tokens** |
+
+**With MCP** (Claude calls `ars_get_section`):
+
+| Step | Approx tokens |
+|------|---------------|
+| Tool schema (loaded once per session) | ~150 |
+| Tool call payload | ~30 |
+| Tool response (clean text + disclaimer) | ~1,400 |
+| Format an answer | ~400 |
+| **Total** | **~2,000 tokens** |
+
+Roughly **3-10x reduction** for one query, and that gap widens fast for searches across multiple sections. Ask "find every section that mentions VRKA" and the MCP returns ranked snippets in one call; the curl approach has to either crawl all 22,780 sections or hope the right keywords lead it to the right pages.
+
+The same logic applies to SOS campaign finance, GitHub PRs, and any other domain where the underlying API is messy or verbose. **MCPs are how you give AI assistants leverage on real-world data without burning context.**
+
+---
+
+## Add to Claude Code
+
+```bash
+claude mcp add --scope user --transport http arizona-statutes \
+  https://ars.cactus.watch/mcp
+```
 
 ## Add to Claude Desktop
-
-Edit your `claude_desktop_config.json`:
 
 ```json
 {
@@ -31,7 +87,7 @@ Edit your `claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. You'll get four new tools:
+## MCP Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -39,6 +95,8 @@ Restart Claude Desktop. You'll get four new tools:
 | `ars_search` | Full-text search, optionally scoped to a title |
 | `ars_list_titles` | List all 47 active titles with section counts |
 | `ars_list_sections` | List sections within a title (browsing) |
+
+Full reference: [Wiki — MCP Tools](https://github.com/az-civic-tools/ars-mcp/wiki/MCP-Tools).
 
 ## REST API
 
@@ -64,6 +122,8 @@ curl "https://ars.cactus.watch/api/ars/search?q=disclaimer&title=16"
 
 Every response includes a `disclaimer` field. Don't strip it.
 
+Full reference: [Wiki — REST API](https://github.com/az-civic-tools/ars-mcp/wiki/REST-API).
+
 ## Architecture
 
 Two Cloudflare Workers backed by a single D1 database with FTS5 full-text search.
@@ -72,7 +132,7 @@ Two Cloudflare Workers backed by a single D1 database with FTS5 full-text search
 ars.cactus.watch
   ├── /                  Static landing page
   ├── /api/ars/*         REST API   (ars-api Worker)
-  └── /mcp               MCP server (ars-api Worker)
+  └── /mcp               MCP server (ars-api Worker, Streamable HTTP)
 
 ars-scraper Worker (no public route)
   ├── Cron: weekly sweep of stale titles
@@ -86,47 +146,11 @@ ars-scraper Worker (no public route)
 | D1 Database | `ars-mcp-db` |
 | Subdomain | `ars.cactus.watch` |
 
-## Repo layout
-
-```
-ars-mcp/
-├── schema/                 D1 schema + migrations
-├── workers/
-│   ├── api/                REST + MCP Worker
-│   └── scraper/            Scraper Worker (cron + manual)
-└── site/                   Static landing page (optional)
-```
+See [Wiki — Architecture](https://github.com/az-civic-tools/ars-mcp/wiki/Architecture) for design rationale.
 
 ## Run it yourself
 
-If you want to host your own copy (or fork for another state):
-
-```bash
-git clone https://github.com/az-civic-tools/ars-mcp.git
-cd ars-mcp
-
-# Install deps in each worker
-cd workers/api && npm install && cd ../..
-cd workers/scraper && npm install && cd ../..
-
-# Create CF resources via wrangler or the Cloudflare MCP, then update wrangler.toml IDs
-# Run schema migration
-npx wrangler d1 execute ars-mcp-db --file=schema/0001_init.sql --remote
-
-# Set scraper auth secret
-cd workers/scraper && npx wrangler secret put SCRAPE_AUTH_TOKEN
-
-# Deploy both workers
-npx wrangler deploy            # in workers/scraper
-cd ../api && npx wrangler deploy
-
-# Bootstrap scrape (run once)
-for t in 1 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49; do
-  curl -X POST -H "Authorization: Bearer $TOKEN" \
-    https://ars-scraper.YOUR.workers.dev/scrape/title/$t
-  sleep 2
-done
-```
+See [Wiki — Self-Hosting](https://github.com/az-civic-tools/ars-mcp/wiki/Self-Hosting) for a fork-and-run guide.
 
 ## Data freshness
 
@@ -147,7 +171,6 @@ The data is provided "as is" with no warranty. See [LICENSE](LICENSE).
 
 ## Sister projects
 
-Built by the same crew behind:
-
+- [sos-mcp](https://github.com/az-civic-tools/sos-mcp) — MCP server for AZ Secretary of State campaign finance (sos.cactus.watch)
 - [Cactus Watch](https://cactus.watch) — Arizona bill tracker with free public API
 - [az-civic-tools](https://github.com/az-civic-tools/az-civic-tools) — District finder, civics education guide
